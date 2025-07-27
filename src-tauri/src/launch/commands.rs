@@ -35,6 +35,7 @@ use crate::{
   tasks::commands::schedule_progressive_task_group,
   utils::{fs::create_zip_from_dirs, window::create_webview_window},
 };
+use shlex::Shlex;
 use std::{collections::HashMap, path::PathBuf};
 use std::{
   io::{prelude::*, BufReader},
@@ -245,13 +246,30 @@ pub async fn launch_game(
     class_paths,
     args: cmd_args,
   } = generate_launch_command(&app)?;
-  let mut cmd_base = Command::new(selected_java.exec_path.clone());
 
-  let full_cmd = std::iter::once(selected_java.exec_path.clone())
-    .chain(cmd_args.iter().cloned())
-    .collect::<Vec<_>>()
-    .join(" ");
-  println!("[Launch Command] {}", full_cmd);
+  let wrapper = game_config.advanced.custom_commands.wrapper_launcher.trim();
+
+  let mut cmd_base = if wrapper.is_empty() {
+    Command::new(selected_java.exec_path.clone())
+  } else {
+    let mut wrapper_parts = Shlex::new(wrapper).collect::<Vec<_>>();
+    wrapper_parts.push(selected_java.exec_path.clone());
+    let mut cmd = Command::new(&wrapper_parts[0]);
+    if wrapper_parts.len() > 1 {
+      cmd.args(&wrapper_parts[1..]);
+    }
+    cmd
+  };
+
+  #[cfg(debug_assertions)]
+  {
+    let full_cmd = std::iter::once(selected_java.exec_path.clone())
+      .chain(cmd_args.iter().cloned())
+      .collect::<Vec<_>>()
+      .join(" ");
+    println!("[Launch Command] {} {}", wrapper, full_cmd);
+    println!("[Launch Classpath] {}", class_paths.join(get_separator()));
+  }
 
   // execute launch command
   #[cfg(target_os = "windows")]
