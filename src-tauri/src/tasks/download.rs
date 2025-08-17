@@ -126,7 +126,7 @@ pub fn into_runtime_task<'a>(
     .map(|_| ());
     drop(file);
 
-    if task_desc.read().unwrap().state.is_canceled() {
+    if task_desc.read().unwrap().state.is_cancelled() {
       tokio::fs::remove_file(&dest_path).await?;
     }
 

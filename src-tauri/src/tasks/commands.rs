@@ -13,8 +13,7 @@ pub async fn schedule_progressive_task_group(
 ) -> SJMCLResult<RuntimeGroupDescSnapshot> {
   let monitor = app.state::<Pin<Box<TaskMonitor>>>();
   let task_group = if with_timestamp {
-    // If with_timestamp is true, append a timestamp to the task group name
-    // to ensure uniqueness and avoid conflicts.
+    // append a timestamp to the task group name to ensure uniqueness.
     let timestamp = chrono::Utc::now().timestamp_millis();
     format!("{task_group}@{timestamp}")
   } else {

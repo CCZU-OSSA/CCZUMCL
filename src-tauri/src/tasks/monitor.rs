@@ -1,4 +1,5 @@
 use crate::launcher_config::commands::retrieve_launcher_config;
+use crate::utils::fs::extract_filename;
 
 use super::download;
 use super::reporter::{GroupReporter, TaskReporter};
@@ -27,11 +28,20 @@ pub type TaskResult = std::io::Result<()>;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum RuntimeState {
-  Stopped { stopped_at: SystemTime },
-  Failed { reason: String },
+  #[serde(rename_all = "camelCase")]
+  Stopped {
+    stopped_at: SystemTime,
+  },
+  #[serde(rename_all = "camelCase")]
+  Failed {
+    reason: String,
+  },
   InProgress,
-  Completed { completed_at: SystemTime },
-  Canceled,
+  #[serde(rename_all = "camelCase")]
+  Completed {
+    completed_at: SystemTime,
+  },
+  Cancelled,
   Pending,
 }
 
@@ -54,8 +64,8 @@ impl RuntimeState {
     matches!(self, RuntimeState::Pending)
   }
 
-  pub fn is_canceled(&self) -> bool {
-    matches!(self, RuntimeState::Canceled)
+  pub fn is_cancelled(&self) -> bool {
+    matches!(self, RuntimeState::Cancelled)
   }
 
   pub fn pollable(&self) -> bool {
@@ -80,7 +90,7 @@ impl RuntimeState {
   }
 
   pub fn set_cancelled(&mut self) {
-    *self = RuntimeState::Canceled;
+    *self = RuntimeState::Cancelled;
   }
 
   pub fn set_completed(&mut self) {
@@ -155,12 +165,16 @@ impl RuntimeTaskDesc {
   }
 
   fn snapshot(&self) -> RuntimeTaskDescSnapshot {
-    RuntimeTaskDescSnapshot {
-      state: self.state.clone(),
-      total: self.total,
-      current: self.current,
-      start_at: self.started_at,
-      created_at: self.created_at,
+    match self.param.clone() {
+      RuntimeTaskParam::Download(param) => RuntimeTaskDescSnapshot {
+        state: self.state.clone(),
+        total: self.total,
+        current: self.current,
+        start_at: self.started_at,
+        created_at: self.created_at,
+        filename: param.filename.unwrap_or_default(),
+        dest: self.path.clone(),
+      },
     }
   }
 }
@@ -318,7 +332,7 @@ where
 
   pub fn combine_all_states(&self) -> RuntimeState {
     if !self.cancelled.is_empty() {
-      return RuntimeState::Canceled;
+      return RuntimeState::Cancelled;
     }
 
     if !self.stopped.is_empty() {
@@ -411,15 +425,19 @@ struct RuntimeGroupDesc {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct RuntimeTaskDescSnapshot {
   state: RuntimeTaskState,
   total: u64,
   current: u64,
   start_at: SystemTime,
   created_at: SystemTime,
+  filename: String,
+  dest: PathBuf,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct RuntimeGroupDescSnapshot {
   name: String,
   task_desc_map: HashMap<TaskId, RuntimeTaskDescSnapshot>,
@@ -487,7 +505,7 @@ impl RuntimeGroupDesc {
     let group_reporter = GroupReporter::new(app.clone(), &self.name);
     match *self.state.read().unwrap() {
       RuntimeGroupState::InProgress => group_reporter.report_group_started(),
-      RuntimeGroupState::Canceled => group_reporter.report_group_cancelled(),
+      RuntimeGroupState::Cancelled => group_reporter.report_group_cancelled(),
       RuntimeGroupState::Stopped { .. } => group_reporter.report_group_stopped(),
       RuntimeGroupState::Failed { .. } => group_reporter.report_group_failed(),
       RuntimeGroupState::Completed { .. } => group_reporter.report_group_completed(),
@@ -612,12 +630,22 @@ impl TaskMonitor {
     let task_desc_map: HashMap<u32, RuntimeTaskDescRwLock> =
       HashMap::from_iter(params.into_iter().map(|param| {
         let task_id = self.id_gen.next_id();
-        let task_desc = Arc::new(RwLock::new(RuntimeTaskDesc::new(
-          self.app_handle.clone(),
-          task_id,
-          Some(group_name.clone()),
-          param,
-        )));
+        let task_desc = match param {
+          RuntimeTaskParam::Download(mut param) => {
+            if param.filename.is_none() {
+              param.filename = Some(extract_filename(
+                param.dest.to_str().unwrap_or_default(),
+                true,
+              ));
+            }
+            Arc::new(RwLock::new(RuntimeTaskDesc::new(
+              self.app_handle.clone(),
+              task_id,
+              Some(group_name.clone()),
+              RuntimeTaskParam::Download(param),
+            )))
+          }
+        };
         (task_id, task_desc)
       }));
     let group_desc = RuntimeGroupDesc::new(group_name.clone(), task_desc_map);
@@ -714,7 +742,7 @@ impl TaskMonitor {
                     task_reporter.report_failed(reason);
                   } else {
                     task_desc.state = group_state.clone();
-                    if group_state.is_canceled() {
+                    if group_state.is_cancelled() {
                       task_reporter.report_canceled();
                     } else if group_state.is_stopped() {
                       task_reporter.report_stopped();
