@@ -14,7 +14,7 @@ use crate::{
     helpers::misc::get_download_api,
     models::{ResourceType, SourceType},
   },
-  tasks::{download::DownloadParam, PTaskParam},
+  tasks::{download::DownloadParam, RuntimeTaskParam},
 };
 
 pub async fn install_fabric_loader(
@@ -24,7 +24,7 @@ pub async fn install_fabric_loader(
   loader: &ModLoader,
   lib_dir: PathBuf,
   client_info: &mut McClientInfo,
-  task_params: &mut Vec<PTaskParam>,
+  task_params: &mut Vec<RuntimeTaskParam>,
 ) -> SJMCLResult<()> {
   let client = app.state::<reqwest::Client>();
   let loader_ver = &loader.version;
@@ -82,7 +82,7 @@ pub async fn install_fabric_loader(
       &[ResourceType::FabricMaven, ResourceType::Libraries],
       &priority[0],
     )?;
-    task_params.push(PTaskParam::Download(DownloadParam {
+    task_params.push(RuntimeTaskParam::Download(DownloadParam {
       src,
       dest: lib_dir.join(&rel),
       filename: None,
